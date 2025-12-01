@@ -1,11 +1,15 @@
 # pages/2_Skill_Analysis_and_Reports.py
+
 import streamlit as st
 import plotly.express as px
 import pandas as pd
 from backend.report_generator import ReportGenerator
+from backend.calculations import Calculations
 from helpers import initialize_session_state
 from datetime import datetime
+
 initialize_session_state()
+
 def create_skill_match_chart(skill_analysis):
     high_match = skill_analysis['high_match_count']
     partial_match = skill_analysis['partial_match_count']
@@ -17,14 +21,7 @@ def create_skill_match_chart(skill_analysis):
         color_discrete_map={'High Match': '#28a745', 'Partial Match': '#ffc107', 'Missing Skills': '#dc3545'}
     )
     return fig
-def calculate_skill_gap(skill_analysis):
-    total_required = len(skill_analysis['matched_skills']) + len(skill_analysis['partial_matches']) + len(skill_analysis['missing_skills'])
-    if total_required == 0:
-        return 0
-    missing_skills_weight = len(skill_analysis['missing_skills'])
-    partial_matches_weight = len(skill_analysis['partial_matches']) * 0.5
-    skill_gap = ((missing_skills_weight + partial_matches_weight) / total_required) * 100
-    return skill_gap
+
 def display_skill_table(skills, skill_type):
     if not skills:
         st.info(f"No {skill_type.replace('_', ' ').lower()} found.")
@@ -36,21 +33,21 @@ def display_skill_table(skills, skill_type):
                 "Job Skill": skill['job_skill'],
                 "Your Skill": skill['resume_skill'],
                 "Match Score": f"{skill['similarity']:.2f}",
-                "Status": "✅ High Match"
+                
             })
         elif skill_type == "partial_matches":
             data.append({
                 "Job Skill": skill['job_skill'],
                 "Your Skill": skill['resume_skill'],
                 "Match Score": f"{skill['similarity']:.2f}",
-                "Status": "⚠️ Partial Match"
+              
             })
-        else:  # missing_skills
+        else:
             data.append({
                 "Job Skill": skill['skill'],
                 "Your Skill": "Not Found",
                 "Match Score": f"{skill['similarity']:.2f}",
-                "Status": "❌ Missing"
+                
             })
     
     df = pd.DataFrame(data)
@@ -72,6 +69,8 @@ def display_skill_table(skills, skill_type):
     )
 
 def display_skill_summary(skill_analysis):
+    calculations = Calculations()
+    
     st.subheader("📋 Skill Analysis Summary")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -80,15 +79,23 @@ def display_skill_summary(skill_analysis):
                        skill_analysis['missing_count'])
         st.metric("Total Skills Required", total_skills)
     with col2:
-        skill_gap = calculate_skill_gap(skill_analysis)
+        skill_gap = calculations.calculate_skill_gap(skill_analysis)
         st.metric("Skill Gap", f"{skill_gap:.1f}%")
     with col3:
-        coverage = 100 - skill_gap
+        coverage = calculations.calculate_skill_coverage(skill_analysis)
         st.metric("Skill Coverage", f"{coverage:.1f}%")
     with col4:
         match_rate = skill_analysis['overall_match']
         st.metric("Match Rate", f"{match_rate:.1f}%")
+
 def main():
+    calculations = Calculations()
+    with st.sidebar:
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.authenticated = False
+            st.session_state.username = None
+            st.session_state.user_id = None
+            st.rerun()
     st.markdown('<h2 class="sub-header">🔍 Skill Analysis & Report</h2>', unsafe_allow_html=True)
     if not st.session_state.resume_data or not st.session_state.job_desc_data:
         st.warning("⚠️ Please upload both resume and job description first.")
@@ -120,13 +127,12 @@ def main():
     
     analysis = st.session_state.analysis_results
     skill_analysis = analysis["skill_analysis"]
-    skill_gap = calculate_skill_gap(skill_analysis)
-    skill_coverage = 100 - skill_gap
+    skill_gap = calculations.calculate_skill_gap(skill_analysis)
+    skill_coverage = calculations.calculate_skill_coverage(skill_analysis)
     st.subheader("🎯 Overall Assessment")
     
     compatibility_score = analysis['compatibility_score']
     
-   
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -138,14 +144,15 @@ def main():
     with col3:
         st.metric("Skill Coverage", f"{skill_coverage:.1f}%")
  
+    assessment_message = calculations.get_assessment_message(compatibility_score)
     if compatibility_score >= 80:
-        st.success("🎉 **Excellent Match!** Your skills are very well aligned with the job requirements.")
+        st.success(assessment_message)
     elif compatibility_score >= 60:
-        st.info("👍 **Good Match!** Your skills match well with some areas for improvement.")
+        st.info(assessment_message)
     elif compatibility_score >= 40:
-        st.warning("⚠️ **Moderate Match.** There are significant skill gaps to address.")
+        st.warning(assessment_message)
     else:
-        st.error("❌ **Poor Match.** Consider developing more relevant skills.")
+        st.error(assessment_message)
   
     display_skill_summary(skill_analysis)
     
