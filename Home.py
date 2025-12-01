@@ -1,96 +1,200 @@
-# Home.py
-import streamlit as st  #for frontend
-from auth import authenticate_user, register_user  #for authentication
-from helpers import initialize_session_state #to store data real time
+# pages/2_Skill_Analysis_and_Reports.py
 
-#to configure the page appers on the tab
-st.set_page_config(
-    page_title="AI-Powered Skill Gap Analyzer",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+import streamlit as st
+import plotly.express as px
+import pandas as pd
+from backend.report_generator import ReportGenerator
+from backend.calculations import Calculations
+from helpers import initialize_session_state
+from datetime import datetime
 
-#start of program
-def main():
-    initialize_session_state() 
-    if not st.session_state.get("authenticated", False):  #if not logged in
-        show_login_page()   #function to show login page
-        return  
-    show_main_app()   #function to show the main front page
+initialize_session_state()
 
-def show_login_page():
-    col1, col2, col3 = st.columns([1, 2, 1])  #divides to 3 cloumns
+def create_skill_match_chart(skill_analysis):
+    high_match = skill_analysis['high_match_count']
+    partial_match = skill_analysis['partial_match_count']
+    missing = skill_analysis['missing_count']
+    fig = px.pie(
+        values=[high_match, partial_match, missing],
+        names=['High Match', 'Partial Match', 'Missing Skills'],
+        title='Skill Match Distribution',
+        color_discrete_map={'High Match': '#28a745', 'Partial Match': '#ffc107', 'Missing Skills': '#dc3545'}
+    )
+    return fig
+
+def display_skill_table(skills, skill_type):
+    if not skills:
+        st.info(f"No {skill_type.replace('_', ' ').lower()} found.")
+        return
+    data = []
+    for skill in skills:
+        if skill_type == "matched_skills":
+            data.append({
+                "Job Skill": skill['job_skill'],
+                "Your Skill": skill['resume_skill'],
+                "Match Score": f"{skill['similarity']:.2f}",
+                
+            })
+        elif skill_type == "partial_matches":
+            data.append({
+                "Job Skill": skill['job_skill'],
+                "Your Skill": skill['resume_skill'],
+                "Match Score": f"{skill['similarity']:.2f}",
+              
+            })
+        else:
+            data.append({
+                "Job Skill": skill['skill'],
+                "Your Skill": "Not Found",
+                "Match Score": f"{skill['similarity']:.2f}",
+                
+            })
+    
+    df = pd.DataFrame(data)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Job Skill": st.column_config.TextColumn(width="large"),
+            "Your Skill": st.column_config.TextColumn(width="large"),
+            "Match Score": st.column_config.ProgressColumn(
+                width="medium",
+                min_value=0,
+                max_value=1,
+                format="%.2f"
+            ),
+            "Status": st.column_config.TextColumn(width="medium")
+        }
+    )
+
+def display_skill_summary(skill_analysis):
+    calculations = Calculations()
+    
+    st.subheader("📋 Skill Analysis Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        total_skills = (skill_analysis['high_match_count'] + 
+                       skill_analysis['partial_match_count'] + 
+                       skill_analysis['missing_count'])
+        st.metric("Total Skills Required", total_skills)
     with col2:
-        st.markdown('<h1 class="main-header">🔐 Resume Analyzer</h1>', unsafe_allow_html=True)
-        tab1, tab2 = st.tabs(["Login", "Sign Up"])
-        with tab1:   #login form
-            with st.form("login_form"):
-                st.subheader("Login to Your Account")
-                username = st.text_input("Username")   #takes usermane
-                password = st.text_input("Password", type="password")  #takes password
-                login_btn = st.form_submit_button("Login", use_container_width=True)
-                if login_btn:
-                    if authenticate_user(username, password):  #funtion to know if the user is present or not
-                        #stores the data 
-                        st.session_state.authenticated = True
-                        st.session_state.username = username
-                        st.rerun()
-                    else:
-                        st.error("Invalid username or password")
-        with tab2:  #for signup page
-            with st.form("signup_form"):
-                st.subheader("Create New Account")
-                new_username = st.text_input("Choose Username", placeholder="Enter your username")
-                new_password = st.text_input("Choose Password", type="password", placeholder="Enter your password")
-                confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
-                signup_btn = st.form_submit_button("Create Account", use_container_width=True)
-                if signup_btn:
-                    #password checking conditions
-                    if not new_username or not new_password:
-                        st.error("Please fill in all fields")
-                    elif new_password != confirm_password:
-                        st.error("Passwords do not match")
-                    elif len(new_username) < 3:
-                        st.error("Username must be at least 3 characters long")
-                    elif len(new_password) < 6:
-                        st.error("Password must be at least 6 characters long")
-                    else:
-                        #to register as new user
-                        success = register_user(new_username, new_password) 
-                        if success:
-                            st.success("Account created successfully! Please login with your new credentials.")
-                        else:
-                            st.error("User already exists!")
+        skill_gap = calculations.calculate_skill_gap(skill_analysis)
+        st.metric("Skill Gap", f"{skill_gap:.1f}%")
+    with col3:
+        coverage = calculations.calculate_skill_coverage(skill_analysis)
+        st.metric("Skill Coverage", f"{coverage:.1f}%")
+    with col4:
+        match_rate = skill_analysis['overall_match']
+        st.metric("Match Rate", f"{match_rate:.1f}%")
 
-def show_main_app():
+def main():
+    calculations = Calculations()
     with st.sidebar:
         if st.button("🚪 Logout", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()  # This will trigger a rerun and show the login page
+            st.session_state.authenticated = False
+            st.session_state.username = None
+            st.session_state.user_id = None
+            st.rerun()
+    st.markdown('<h2 class="sub-header">🔍 Skill Analysis & Report</h2>', unsafe_allow_html=True)
+    if not st.session_state.resume_data or not st.session_state.job_desc_data:
+        st.warning("⚠️ Please upload both resume and job description first.")
+        return
+    if st.session_state.nlp_processor is None:
+        try:
+            from backend.nlp_processor import NLPProcessor
+            from backend.skill_analyzer import SkillAnalyzer
+            st.session_state.nlp_processor = NLPProcessor()
+            st.session_state.skill_analyzer = SkillAnalyzer(st.session_state.nlp_processor)
+        except Exception as e:
+            st.error(f"Error initializing NLP components: {e}")
+            return
+    if st.button("🔍 Run Skill Gap Analysis", type="primary", use_container_width=True):
+        with st.spinner("Analyzing documents..."):
+            try:
+                st.session_state.analysis_results = st.session_state.skill_analyzer.analyze_skill_gap(
+                    st.session_state.resume_data['text'],
+                    st.session_state.job_desc_data['text']
+                )
+                st.success("✅ Analysis completed successfully!")
+                    
+            except Exception as e:
+                st.error(f"❌ Error during analysis: {e}")
+                return
+    if not st.session_state.analysis_results:
+        st.info("👆 Click the button above to run the skill gap analysis")
+        return
     
-    st.markdown(
-    '<h1 class="main-header" style="text-align: center;">AI-Powered Skill Gap Analyzer</h1>', 
-    unsafe_allow_html=True
-)
-    st.markdown(f"""
-    ## Welcome, {st.session_state.username}! 
-    This application uses advanced Natural Language Processing (NLP) techniques to:\\
-    📁 Upload your resume and job description files \\
-    🔍 Analyze - Extract and compare skills using AI \\
-    📊 Visualize - View skill gaps and compatibility scores \\
-    📄 Export - Download detailed analysis reports \\
-    """)
-    st.markdown("---")
-    st.subheader("Quick Actions")
-    col1, col2 = st.columns(2)
+    analysis = st.session_state.analysis_results
+    skill_analysis = analysis["skill_analysis"]
+    skill_gap = calculations.calculate_skill_gap(skill_analysis)
+    skill_coverage = calculations.calculate_skill_coverage(skill_analysis)
+    st.subheader("🎯 Overall Assessment")
+    
+    compatibility_score = analysis['compatibility_score']
+    
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        if st.button("📁 Upload Documents", use_container_width=True):
-            st.switch_page("pages/1_Upload_Documents.py")
+        st.metric("Overall Compatibility", f"{compatibility_score:.1f}%")
+    
     with col2:
-        if st.button("🔍 Skill Analysis", use_container_width=True):
-            st.switch_page("pages/2_Skill_Analysis_and_Results.py")
+        st.metric("Skill Gap", f"{skill_gap:.1f}%")
+    
+    with col3:
+        st.metric("Skill Coverage", f"{skill_coverage:.1f}%")
+ 
+    assessment_message = calculations.get_assessment_message(compatibility_score)
+    if compatibility_score >= 80:
+        st.success(assessment_message)
+    elif compatibility_score >= 60:
+        st.info(assessment_message)
+    elif compatibility_score >= 40:
+        st.warning(assessment_message)
+    else:
+        st.error(assessment_message)
+  
+    display_skill_summary(skill_analysis)
+    
+    st.subheader("📈 Visual Analysis")
+    
+    fig = create_skill_match_chart(skill_analysis)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.subheader("🔎 Detailed Skill Analysis")
+    
+    with st.expander(f"✅ High Matches ({skill_analysis['high_match_count']} skills)", expanded=True):
+        st.write("**Skills where you have strong matching experience:**")
+        display_skill_table(skill_analysis['matched_skills'], "matched_skills")
+    
+    with st.expander(f"⚠️ Partial Matches ({skill_analysis['partial_match_count']} skills)"):
+        st.write("**Skills where you have some experience but could improve:**")
+        display_skill_table(skill_analysis['partial_matches'], "partial_matches")
+    
+    with st.expander(f"❌ Missing Skills ({skill_analysis['missing_count']} skills)"):
+        st.write("**Skills required for the job that are missing from your resume:**")
+        display_skill_table(skill_analysis['missing_skills'], "missing_skills")
+    
+    st.subheader("📄 Download Report")
+    st.info("📝 Download the pdf for future reference as the data will be lost when you refresh or logout")
+    if st.session_state.analysis_results:
+        if st.button("Generate PDF Report", type="primary"):
+            with st.spinner("Creating report..."):
+                try:
+                    report_generator = ReportGenerator()
+                    pdf_data = report_generator.generate_pdf_report(st.session_state.analysis_results)
+                    
+                    st.download_button(
+                        label="Download PDF",
+                        data=pdf_data,
+                        file_name=f"skill_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf"
+                    )
+                    
+                    st.success("PDF ready for download!")
+                    
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
